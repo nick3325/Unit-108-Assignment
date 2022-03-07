@@ -1,12 +1,17 @@
 
 from random import random
+from sqlite3 import Cursor
 from mock_data import catalog
 from flask import Flask, abort, request
 from about_me import me 
 import json 
+from flask_cors import CORS
+from config import db
+from bson import ObjectId
 
 #create the server/app
 app = Flask("server")
+CORS(app)
 
 @app.route("/", methods=["get"])
 def home_page():
@@ -30,7 +35,16 @@ def get_address():
 
 @app.route("/api/catalog")
 def get_catalog():
-    return json.dumps(catalog)
+
+    cursor = db.products.find({})
+    results = []
+    for prod in cursor:
+        results.append(prod)
+        prod["_id"] = str(prod["_id"])
+     
+
+    return json.dumps(results)
+    
 
 @app.route("/api/catalog", methods=["Post"])
 def save_product():
@@ -46,22 +60,28 @@ def save_product():
         return abort(400, "Price is required")
 
     # if the price is not and int and not a float, error 
-    if not isinstance(product["price"], int) or isinstance(product["price"], float):
+    if not isinstance(product["price"], int) and not isinstance(product["price"], float):
         return abort(400, "It is not a price")
 
     # the price should be greater than zero 
     if product["price"] < 0: 
         return abort(400, "Can not be less that zero")
     
-    product["_id"] = random.randint(1000,5000) 
-    catalog.append(product)
+    db.products.insert_one(product)
+
+
+    #hack to fix the _id 
+    product["_id"] = str(product["_id"])
     return json.dumps(product) 
 
 #get /api/catalog/count
 @app.route("/api/catalog/count")
-def get_catalogcount():     
-    count = len(catalog)
-    return json.dumps(count)
+def get_catalogcount():  
+    cursor = db.products.find({})   
+    count = len(cursor)
+    for prod in cursor:
+        count += 1
+    return json.dumps(cursor.count())
 
 @app.route("/api/catalog/sum")
 def get_sum():
@@ -74,17 +94,27 @@ def get_sum():
 
 @app.route("/api/product/<id>")
 def get_product(id):
-    for prod in catalog:
-        if id == prod["_id"]:
-            return json.dumps(prod)
-    return abort(404) # 400 not found
+    prod = db.products.find_one({"_id": ObjectId(id)})
+    if not ObjectId.is_valid(id):
+        return abort(400, "id is not a valid ObjectId")
+    if not prod:
+        return abort(404, "Product not found")
+
+    prod["_id"] = str(prod["_id"])
+    return json.dumps(prod)
+    
+    #return abort(404)  # 400 not found
 
 @app.route("/api/product/most_expensive")
 def get_most_expensive():
     pivot = catalog[0]
-    for prod in catalog:
+    cursor = db.products.find({})
+    for prod in cursor:
         if prod["price"] > pivot["price"]:
             pivot = prod
+
+
+        pivot["_id"] = str(pivot["_id"])
     return json.dumps(pivot)
 
 # get /api/categories
@@ -94,20 +124,23 @@ def get_most_expensive():
 def get_categories():
 
     res = []
+    cursor = db.products.find({})
     # 2 - print each category 
-    for prod in catalog:
+    for prod in cursor:
        category = prod["category"]
        if not category in res:
         res.append(category)
+    return json.dumps(res)
 
 
 @app.route("/api/catalog/<category>")
 def get_allproducts(category):
     res=[]
-    for prod in catalog:
-        if prod["category"] == category:
-            res.append(prod)
-            #append prod to the list
+    cursor = db.products.find({"category": category})
+    for prod in cursor:
+        prod["_id"] = str(prod["_id"])
+        res.append(prod)
+
     return json.dumps(res)
 
 coupons = []
@@ -119,25 +152,56 @@ coupons = []
 
 @app.route("/api/coupons")
 def get_coupons():
-    return json.dumps(coupons)
+    cursor = db.discounts.find({})
+    results = []
+    for prod in cursor:
+        prod["_id"] = str(prod["_id"])
+    return json.dumps(results)
 
 @app.route("/api/coupons", methods=["Post"])
 def save_coupons():
-    coupons = request.get_json()
+    coupon = request.get_json()
 
-    # validation
+    db.coupons.insert_one(coupon)
 
-
-    coupons["_id"] = random.randint(500,900)
-    coupons.append(coupons)
-    return json.dumps(coupons)
+    coupon["_id"] = str(coupon["_id"])
+    return json.dumps(coupon)
 
 @app.route("/api/coupon/<id>")
 def get_couponsbycode(code):
-    for coupon in coupons:
-        if coupons["code"] == code:
-            return json.dumps(coupon)
-    return abort(404) # 400 not found
+    coupon = db.products.find({"code": code})
+    if not coupon:
+        return abort(404, 'Coupon not found for code: ' + code)
+    coupon["_id"] = str(coupon['_id'])
+    return json.dumps(coupon)
+    
+
+@app.route("/api/saveOrders", methods = ["Post"])
+def save_orders():
+    order = request.get_json()
+
+    db.orders.insert_one(order)
+
+    order["_id"] = str(order["_id"])
+    return json.dumps(order)
+
+
+@app.route("/api/retrieveOrders")
+def get_orders():
+    cursor = db.orders.find({})
+    results = []
+    for order in cursor:
+        order["_id"] = str(order["_id"])
+    return json.dumps(results)
+
+
+@app.route("/api/retrieveOrders/<user_id>")
+def get_ordersbyId(user_id):
+    order = db.orders.find_one({"user_id": user_id})
+    if not order:
+        return abort(404, "Not correct ID")
+    order["_id"] = str(order['_id'])
+    return json.dumps(order)
 
 #start the server 
 app.run(debug=True)

@@ -25,4 +25,4 @@ python -m pip install flask
 
 
 # run the server
-python server.py
+py server.py
